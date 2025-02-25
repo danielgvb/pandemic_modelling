@@ -8,7 +8,7 @@ library(ggplot2)
 library(gridExtra)  # For arranging plots in a grid
 
 # change directory
-setwd('Github/pandemic_modelling/Data/silver/')
+setwd('../Data/silver/')
 
 # 0. Load data-------------------------
 df_m<- read.csv("covid_data_monthly.csv")
@@ -63,6 +63,9 @@ covid_series_cum <- df_country$cases
 
 # Train GGM model on first n days
 ggm_model <- GGM(covid_series, mt='base', display = TRUE)
+summary(ggm_model)
+ggm_model <- GGM(covid_series, mt=function(x) pchisq(x,10), display = TRUE, )
+
 
 # Forecast for the entire period
 fitted_forecast <- predict(ggm_model, newx = 1:length(covid_series))
@@ -87,14 +90,13 @@ r2
 #2. functions-----------------------
 
 # Define function to fit Bass model and generate plot for each country
-plot_bm_model <- function(country_name, df, n =150) {
+plot_bm_model <- function(country_name, df) {
   # Filter data for the specific country
   df_country <- df %>% filter(country == country_name)
   covid_series <- df_country$new_cases
   
   # Train BM model on first n days
-  covid_series_train <- covid_series[1:n]
-  bm_model <- BM(covid_series_train, display = FALSE)
+  bm_model <- BM(covid_series, display = FALSE)
   
   # Forecast for the entire period
   fitted_forecast <- predict(bm_model, newx = c(1:length(covid_series)))
@@ -110,27 +112,68 @@ plot_bm_model <- function(country_name, df, n =150) {
   )
   
   p <- ggplot(df_plot, aes(x = Time)) +
-    geom_line(aes(y = Actual), color = "black", size = 1) +
-    geom_line(aes(y = Fitted), color = "red", linetype = "dashed", size = 1) +
+    geom_line(aes(y = Actual, color = "Actual"), size = 1) +
+    geom_line(aes(y = Fitted, color = "Fitted"), linetype = "dashed", size = 1) +
+    scale_color_manual(values = c("Actual" = "black", "Fitted" = "red")) +
+    labs(color = "Legend") +  # Legend title
     ggtitle(paste("COVID-19 Cases in", country_name)) +
-    ylab("Daily Cases") + xlab("Time (Days)") +
-    theme_minimal()
-  
+    ylab("Cases") + 
+    xlab("Time") +
+    theme_minimal() +
+    theme(
+      text = element_text(size = 8),
+      axis.text = element_text(size = 8),
+      axis.title = element_text(size = 8),
+      plot.title = element_text(size = 10),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")
+    )
   return(p)
 }
 
 
-plot_ggm_model <- function(country_name, df, n =150) {
+# run and plot GGM with catch error
+plot_ggm_model <- function(country_name, df) {
+  
   # Filter data for the specific country
   df_country <- df %>% filter(country == country_name)
   covid_series <- df_country$new_cases
   
-  # Train BM model on first n days
-  covid_series_train <- covid_series[1:n]
-  ggm_model <- GGM(covid_series_train, display = FALSE)
+  # Initialize the GGM model
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(covid_series, display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(covid_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
   
   # Forecast for the entire period
-  fitted_forecast <- predict(ggm_model, newx = c(1:length(covid_series)))
+  fitted_forecast <- predict(ggm_model, newx = 1:length(covid_series))
   
   # Compute instantaneous fitted values
   fitted_forecast_inst <- make.instantaneous(fitted_forecast)
@@ -146,11 +189,12 @@ plot_ggm_model <- function(country_name, df, n =150) {
     geom_line(aes(y = Actual), color = "black", size = 1) +
     geom_line(aes(y = Fitted), color = "red", linetype = "dashed", size = 1) +
     ggtitle(paste("COVID-19 Cases in", country_name)) +
-    ylab("Daily Cases") + xlab("Time (Days)") +
+    ylab("Cases") + xlab("Time") +
     theme_minimal()
   
   return(p)
 }
+
 
 
 # Function to calculate R² and RMSE for BM
@@ -181,8 +225,6 @@ calculate_metrics_bm <- function(country_name, df) {
 }
 
 
-
-
 #  Function to calculate R² and RMSE for GGM based on cumulative data
 calculate_metrics_ggm <- function(country_name, df) {
   # Filter data for the specific country
@@ -190,8 +232,37 @@ calculate_metrics_ggm <- function(country_name, df) {
   covid_series <- df_country$new_cases
   covid_series_cum <- df_country$cases
   
-  # Train GGM model on first n days
-  ggm_model <- GGM(covid_series, mt='base', display = FALSE)
+  # Initialize GGM model variable
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(covid_series, mt='base', display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(covid_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
   
   # Forecast for the entire period
   fitted_forecast <- predict(ggm_model, newx = 1:length(covid_series))
@@ -212,12 +283,9 @@ calculate_metrics_ggm <- function(country_name, df) {
   return(c(R2 = r2, RMSE = rmse))
 }
 
-
-
-unique_countries
+# try function with error catch
 calculate_metrics_ggm('Panama', df_d)
 
-GGM()
 
 # 2. BM on COVID---------------------
 
@@ -227,11 +295,9 @@ unique_countries
 
 ## 2.1 Daily-------------------
 
-length_series <- nrow(df_col_d)
-
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_bm_model(country, df_d, n=length_series)
+  plot_bm_model(country, df_d)
 })
 
 # Arrange plots in a 2x5 grid
@@ -239,21 +305,19 @@ grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 ## 2.2 Weekly-----------------------------------
 
-
-length_series <- nrow(df_col_w)
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_bm_model(country, df_w, n=length_series)
+  plot_bm_model(country, df_w)
 })
 
 # Arrange plots in a 2x5 grid
 grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 ## 2.3 Monthly----------------------------------
-length_series <- nrow(df_col)
+
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_bm_model(country, df_m, n=length_series)
+  plot_bm_model(country, df_m)
 })
 
 # Arrange plots in a 2x5 grid
@@ -262,51 +326,42 @@ grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 
 # 3. GGM on COVID---------------------
-
-
 ## 2.1 Daily-------------------
-
-length_series <- nrow(df_col_d)
 
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_ggm_model(country, df_d, n=length_series)
+  plot_ggm_model(country, df_d)
 })
 
 # Arrange plots in a 2x5 grid
 grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 ## 3.2 Weekly-----------------------------------
-
-
-length_series <- nrow(df_col_w)
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_ggm_model(country, df_w, n=length_series)
+  plot_ggm_model(country, df_w)
 })
 
 # Arrange plots in a 2x5 grid
 grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 ## 3.3 Monthly----------------------------------
-length_series <- nrow(df_col)
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
-  plot_ggm_model(country, df_m, n=length_series)
+  plot_ggm_model(country, df_m)
 })
 
 # Arrange plots in a 2x5 grid
 grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 
-# 4. Metrics---------------
+# 4. Metrics BM vs GGM---------------
 
 # Initialize empty data frames to store metrics
 bm_metrics <- data.frame(Country = unique_countries, R2 = NA, RMSE = NA)
 ggm_metrics <- data.frame(Country = unique_countries, R2 = NA, RMSE = NA)
 
 ## 4.1 Daily----------------
-
 
 # Loop through the countries and calculate metrics for BM
 bm_metrics$R2 <- sapply(unique_countries, function(country) {
@@ -329,6 +384,7 @@ combined_metrics <- merge(bm_metrics, ggm_metrics, by = "Country", suffixes = c(
 
 # Display the table
 print(combined_metrics)
+View(combined_metrics)
 
 ## 4.2 Weekly-------------------
 
@@ -353,6 +409,7 @@ combined_metrics <- merge(bm_metrics, ggm_metrics, by = "Country", suffixes = c(
 
 # Display the table
 print(combined_metrics)
+View(combined_metrics)
 
 
 ## 4.3 Monthly-------------------
@@ -381,8 +438,317 @@ print(combined_metrics)
 View(combined_metrics)
 
 
+# 5. GGM Residuals-------------------------
+
+# function to get fitted values and residuals
+ggm_residuals <- function(country_name, df) {
+  # Filter data for the specific country
+  df_country <- df %>% filter(country == country_name)
+  covid_series <- df_country$new_cases
+  covid_series_cum <- df_country$cases
+  
+  # Initialize GGM model variable
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(covid_series, mt='base', display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(covid_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(ggm_model, newx = 1:length(covid_series))
+  
+  # Calculate residuals
+  residuals <- covid_series_cum - fitted_forecast
+  
+  
+  
+  # Create and return a dataframe with fitted values and residuals
+  df_residuals <- data.frame(
+    Time = 1:length(covid_series),
+    Fitted = fitted_forecast,
+    Residuals = residuals,
+    Cases = covid_series_cum # actual covid cases
+    
+  )
+  
+  return(df_residuals)
+}
+
+# try it out
+output <- ggm_residuals('Chile', df_m)
+tsdisplay(output$Residuals)
+
+## 5.1 Daily-----------
+library(patchwork)
+
+# Create a list of ggplot objects (if applicable)
+plot_list <- lapply(unique_countries, function(country) {
+  print(country)
+  df_res <- ggm_residuals(country, df_d)
+  residual_ts <- ts(df_res$Residuals)
+  p <- autoplot(residual_ts) + ggtitle(paste("Residuals -", country))
+  return(p)
+})
+
+# Combine plots using patchwork
+combined_plot <- wrap_plots(plot_list, nrow = 2, ncol = 5)
+print(combined_plot)
+
+## 5.2 Weekly-----------
+
+# Create a list of ggplot objects (if applicable)
+plot_list <- lapply(unique_countries, function(country) {
+  print(country)
+  df_res <- ggm_residuals(country, df_w)
+  residual_ts <- ts(df_res$Residuals)
+  p <- autoplot(residual_ts) + ggtitle(paste("Residuals -", country))
+  return(p)
+})
+
+# Combine plots using patchwork
+combined_plot <- wrap_plots(plot_list, nrow = 2, ncol = 5)
+print(combined_plot)
+
+## 5.3 Monthly-----------
+# Create a list of ggplot objects (if applicable)
+plot_list <- lapply(unique_countries, function(country) {
+  print(country)
+  df_res <- ggm_residuals(country, df_m)
+  residual_ts <- ts(df_res$Residuals)
+  p <- autoplot(residual_ts) + ggtitle(paste("Residuals -", country))
+  return(p)
+})
+
+# Combine plots using patchwork
+combined_plot <- wrap_plots(plot_list, nrow = 2, ncol = 5)
+print(combined_plot)
 
 
+# 6. GGM Refinement--------------------
+
+# Function to process each country
+process_country <- function(country, df, save_dir = "plots") {
+  # Step 1: Get GGM residuals, fitted values, and actual cases
+  df_ggm <- ggm_residuals(country, df)
+  
+  # Step 2: Fit auto.arima using GGM fitted values as xreg
+  arima_model <- auto.arima(df_ggm$Cases, xreg = df_ggm$Fitted)
+  
+  # Step 3: Get fitted values from the ARIMA model
+  arima_fitted <- fitted(arima_model)
+  
+  # Step 4: Create a data frame for plotting
+  plot_data <- data.frame(
+    Time = df_ggm$Time,
+    Actual = df_ggm$Cases,
+    Fitted = arima_fitted
+  )
+  
+  # Step 5: Plot actual vs. fitted values
+  plot <- ggplot(plot_data, aes(x = Time)) +
+    geom_line(aes(y = Actual, color = "Actual"), linewidth = 1) +
+    geom_line(aes(y = Fitted, color = "Fitted"), linewidth = 1, linetype = "dashed") +
+    labs(
+      title = paste(country),
+      x = "Time",
+      y = "Cases",
+      color = "Legend"
+    ) +
+    theme_minimal() +
+    scale_color_manual(values = c("Actual" = "blue", "Fitted" = "red")) +
+    theme(
+      legend.position = c(0.9, 0.1), #Bottom right
+    )
+  
+  return(plot)
+}
+
+## 6.1 Daily-------------------
+# Iterate over each country and process
+plot_list <- lapply(unique_countries, function(country) {
+  process_country(country, df_d)
+})
+
+# Arrange plots in a 2x5 grid
+grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
+
+## 6.2 Weekly-------------------
+# Iterate over each country and process
+plot_list <- lapply(unique_countries, function(country) {
+  process_country(country, df_w)
+})
+
+# Arrange plots in a 2x5 grid
+grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 
 
+## 6.3 Monthly-------------------
+# Iterate over each country and process
+plot_list <- lapply(unique_countries, function(country) {
+  process_country(country, df_m)
+})
 
+# Arrange plots in a 2x5 grid
+grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
+
+
+# 7. GGM Refinement Metrics----------------
+
+# Function to compute R² and RMSE for each country
+process_country_metrics <- function(country, df) {
+  # Step 1: Get GGM residuals, fitted values, and actual cases
+  df_ggm <- ggm_residuals(country, df)
+  
+  # Step 2: Fit auto.arima using GGM fitted values as xreg
+  arima_model <- auto.arima(df_ggm$Cases, xreg = df_ggm$Fitted)
+  
+  # Step 3: Get fitted values from the ARIMA model
+  arima_fitted <- fitted(arima_model)
+  
+  # Step 4: Compute R² and RMSE
+  actual <- df_ggm$Cases
+  fitted <- arima_fitted
+  
+  # R² calculation
+  ss_total <- sum((actual - mean(actual))^2)
+  ss_residual <- sum((actual - fitted)^2)
+  r_squared <- 1 - (ss_residual / ss_total)
+  
+  # RMSE calculation
+  rmse <- sqrt(mean((actual - fitted)^2))
+  
+  # Step 5: Return results as a data frame
+  result <- data.frame(
+    Country = country,
+    R2 = r_squared,
+    RMSE = rmse
+  )
+  
+  return(result)
+}
+
+## 7.1 Daily------------
+
+metrics_df <- lapply(unique_countries, function(country) {
+  process_country_metrics(country, df_d)
+}) %>% bind_rows()
+
+# Print the resulting data frame
+print(metrics_df)
+View(metrics_df)
+
+## 7.2 Weekly------------
+
+metrics_df <- lapply(unique_countries, function(country) {
+  process_country_metrics(country, df_w)
+}) %>% bind_rows()
+
+# Print the resulting data frame
+
+View(metrics_df)
+
+
+## 7.3 Monthly------------
+
+metrics_df <- lapply(unique_countries, function(country) {
+  process_country_metrics(country, df_m)
+}) %>% bind_rows()
+
+# Print the resulting data frame
+View(metrics_df)
+
+# Part 2: Epidemics--------------------------
+
+# 8. Load data
+df_dengue <- read.csv("dengue_no_split.csv")
+df_zika<- read.csv("zika.csv")
+df_chic <- read.csv("chicunguya.csv")
+head(df_dengue)
+plot(df_dengue$Casos)
+plot(df_zika$Casos)
+plot(df_chicunguya$Casos)
+
+# 9. Adjust format--------------------
+
+## 9.1 Time series objects------------
+
+### 9.1.1 Dengue-------------------
+# Load necessary library
+library(lubridate)
+
+# Ensure the DATE column is in Date format
+df_dengue$DATE <- as.Date(df_dengue$DATE)
+
+# Create a time series object
+ts_casos_dengue <- ts(
+  df_dengue$Casos, 
+  frequency = 52, 
+  start = c(
+    year(min(df_dengue$DATE)), 
+    week(min(df_dengue$DATE))
+  )
+)
+plot(ts_casos_dengue, main = "Weekly Dengue Cases", xlab = "Time", ylab = "Casos")
+plot(diff(ts_casos_dengue), main = "Weekly Dengue Cases-Diff", xlab = "Time", ylab = "Casos")
+
+### 9.1.2 Zika-------------------
+
+# Ensure the DATE column is in Date format
+df_zika$DATE <- as.Date(df_zika$DATE)
+
+# Create a time series object
+ts_casos_zika <- ts(
+  df_zika$Casos, 
+  frequency = 52, 
+  start = c(
+    year(min(df_zika$DATE)), 
+    week(min(df_zika$DATE))
+  )
+)
+plot(ts_casos_zika, main = "Weekly Zika Cases", xlab = "Time", ylab = "Casos")
+plot(diff(ts_casos_zika), main = "Weekly Zika-Diff", xlab = "Time", ylab = "Casos")
+
+### 9.1.3 Chicunguya-------------------
+
+# Ensure the DATE column is in Date format
+df_chic$DATE <- as.Date(df_chic$DATE)
+
+# Create a time series object
+ts_casos_chic <- ts(
+  df_chic$Casos, 
+  frequency = 52, 
+  start = c(
+    year(min(df_chic$DATE)), 
+    week(min(df_chic$DATE))
+  )
+)
+plot(ts_casos_chic, main = "Weekly Chicunguya Cases", xlab = "Time", ylab = "Casos")
+plot(diff(ts_casos_chic), main = "Weekly Chicunguya Zika-Diff", xlab = "Time", ylab = "Casos")
+
+
+# 10. adjust functions----------------------
