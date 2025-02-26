@@ -6,6 +6,7 @@ library(DIMORA)
 library(dplyr)
 library(ggplot2)
 library(gridExtra)  # For arranging plots in a grid
+library(lubridate) # for date handling in time series
 
 # change directory
 setwd('../Data/silver/')
@@ -90,7 +91,7 @@ r2
 #2. functions-----------------------
 
 # Define function to fit Bass model and generate plot for each country
-plot_bm_model <- function(country_name, df) {
+plot_bm_model <- function(country_name, df, cumulative = FALSE) {
   # Filter data for the specific country
   df_country <- df %>% filter(country == country_name)
   covid_series <- df_country$new_cases
@@ -104,12 +105,21 @@ plot_bm_model <- function(country_name, df) {
   # Compute instantaneous fitted values
   fitted_forecast_inst <- make.instantaneous(fitted_forecast)
   
+  if (cumulative == FALSE){
   # Create plot using ggplot2
-  df_plot <- data.frame(
-    Time = 1:length(covid_series),
-    Actual = covid_series,
-    Fitted = fitted_forecast_inst
-  )
+    df_plot <- data.frame(
+      Time = 1:length(covid_series),
+      Actual = covid_series,
+      Fitted = fitted_forecast_inst
+    )
+  }
+  else{
+    df_plot <- data.frame(
+      Time = 1:length(covid_series),
+      Actual = cumsum(covid_series),
+      Fitted = fitted_forecast
+    )
+  }
   
   p <- ggplot(df_plot, aes(x = Time)) +
     geom_line(aes(y = Actual, color = "Actual"), size = 1) +
@@ -134,7 +144,7 @@ plot_bm_model <- function(country_name, df) {
 
 
 # run and plot GGM with catch error
-plot_ggm_model <- function(country_name, df) {
+plot_ggm_model <- function(country_name, df, cumulative = FALSE) {
   
   # Filter data for the specific country
   df_country <- df %>% filter(country == country_name)
@@ -177,14 +187,21 @@ plot_ggm_model <- function(country_name, df) {
   
   # Compute instantaneous fitted values
   fitted_forecast_inst <- make.instantaneous(fitted_forecast)
-  
+  if (cumulative == FALSE) {
   # Create plot using ggplot2
-  df_plot <- data.frame(
-    Time = 1:length(covid_series),
-    Actual = covid_series,
-    Fitted = fitted_forecast_inst
-  )
-  
+    df_plot <- data.frame(
+      Time = 1:length(covid_series),
+      Actual = covid_series,
+      Fitted = fitted_forecast_inst
+    )
+  }
+  else {
+    df_plot <- data.frame(
+      Time = 1:length(covid_series),
+      Actual = cumsum(covid_series),
+      Fitted = fitted_forecast
+    )
+  }
   p <- ggplot(df_plot, aes(x = Time)) +
     geom_line(aes(y = Actual), color = "black", size = 1) +
     geom_line(aes(y = Fitted), color = "red", linetype = "dashed", size = 1) +
@@ -285,7 +302,7 @@ calculate_metrics_ggm <- function(country_name, df) {
 
 # try function with error catch
 calculate_metrics_ggm('Panama', df_d)
-
+plot_bm_model('Uruguay', df_d, cumulative = TRUE)
 
 # 2. BM on COVID---------------------
 
@@ -295,6 +312,7 @@ unique_countries
 
 ## 2.1 Daily-------------------
 
+# new cases
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
   plot_bm_model(country, df_d)
@@ -302,6 +320,16 @@ plot_list <- lapply(unique_countries, function(country) {
 
 # Arrange plots in a 2x5 grid
 grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
+
+# cumulative cases
+plot_list <- lapply(unique_countries, function(country) {
+  plot_bm_model(country, df_d, cumulative =TRUE)
+})
+
+# Arrange plots in a 2x5 grid
+grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
+
+
 
 ## 2.2 Weekly-----------------------------------
 
@@ -328,9 +356,19 @@ grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
 # 3. GGM on COVID---------------------
 ## 2.1 Daily-------------------
 
+# new cases
 # Loop through the first 10 countries (to fit 2x5 grid)
 plot_list <- lapply(unique_countries, function(country) {
   plot_ggm_model(country, df_d)
+})
+
+# Arrange plots in a 2x5 grid
+grid.arrange(grobs = plot_list, nrow = 2, ncol = 5)
+
+# cumulative cases
+# Loop through the first 10 countries (to fit 2x5 grid)
+plot_list <- lapply(unique_countries, function(country) {
+  plot_ggm_model(country, df_d, cumulative = TRUE)
 })
 
 # Arrange plots in a 2x5 grid
@@ -691,15 +729,13 @@ df_chic <- read.csv("chicunguya.csv")
 head(df_dengue)
 plot(df_dengue$Casos)
 plot(df_zika$Casos)
-plot(df_chicunguya$Casos)
+plot(df_chic$Casos)
 
 # 9. Adjust format--------------------
 
 ## 9.1 Time series objects------------
 
 ### 9.1.1 Dengue-------------------
-# Load necessary library
-library(lubridate)
 
 # Ensure the DATE column is in Date format
 df_dengue$DATE <- as.Date(df_dengue$DATE)
@@ -752,3 +788,467 @@ plot(diff(ts_casos_chic), main = "Weekly Chicunguya Zika-Diff", xlab = "Time", y
 
 
 # 10. adjust functions----------------------
+plot_bm_model_epidemics <- function( time_series, cumulative = FALSE) {
+
+  # Train BM model on first n days
+  bm_model <- BM(time_series, display = FALSE)
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(bm_model, newx = c(1:length(time_series)))
+  
+  # Compute instantaneous fitted values
+  fitted_forecast_inst <- make.instantaneous(fitted_forecast)
+  
+  if (cumulative == FALSE){
+    # Create plot using ggplot2
+    df_plot <- data.frame(
+      Time = 1:length(time_series),
+      Actual = time_series,
+      Fitted = fitted_forecast_inst
+    )
+  }
+  else{
+    df_plot <- data.frame(
+      Time = 1:length(time_series),
+      Actual = cumsum(time_series),
+      Fitted = fitted_forecast
+    )
+  }
+  
+  p <- ggplot(df_plot, aes(x = Time)) +
+    geom_line(aes(y = Actual, color = "Actual"), size = 1) +
+    geom_line(aes(y = Fitted, color = "Fitted"), linetype = "dashed", size = 1) +
+    scale_color_manual(values = c("Actual" = "black", "Fitted" = "red")) +
+    labs(color = "Legend") +  # Legend title
+    ggtitle(paste("Weekly Cases")) +
+    ylab("Cases") + 
+    xlab("Time") +
+    theme_minimal()
+  print(p)
+}
+
+
+# run and plot GGM with catch error
+plot_ggm_model_epidemics <- function(time_series, cumulative = FALSE) {
+  
+  # Initialize the GGM model
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(time_series, display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(time_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(ggm_model, newx = 1:length(time_series))
+  
+  # Compute instantaneous fitted values
+  fitted_forecast_inst <- make.instantaneous(fitted_forecast)
+  if (cumulative == FALSE) {
+    # Create plot using ggplot2
+    df_plot <- data.frame(
+      Time = 1:length(time_series),
+      Actual = time_series,
+      Fitted = fitted_forecast_inst
+    )
+  }
+  else {
+    df_plot <- data.frame(
+      Time = 1:length(time_series),
+      Actual = cumsum(time_series),
+      Fitted = fitted_forecast
+    )
+  }
+  p <- ggplot(df_plot, aes(x = Time)) +
+    geom_line(aes(y = Actual), color = "black", size = 1) +
+    geom_line(aes(y = Fitted), color = "red", linetype = "dashed", size = 1) +
+    ggtitle(paste("Weekly Cases")) +
+    ylab("Cases") + xlab("Time") +
+    theme_minimal()
+  print(p)
+}
+
+
+
+# Function to calculate R² and RMSE for BM
+calculate_metrics_bm_epidemics <- function(time_series) {
+ 
+  time_series_cum <- cumsum(time_series)
+  
+  # Train BM model on first n days
+  bm_model <- BM(time_series, display = FALSE)
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(bm_model, newx = 1:length(time_series))
+  
+  cumsum_actual <- time_series_cum
+  cumsum_fitted <- fitted_forecast
+  # Calculate R² based on cumulative values
+  residuals <- cumsum_actual - cumsum_fitted
+  ss_res <- sum(residuals^2)
+  ss_tot <- sum((cumsum_actual - mean(cumsum_actual))^2)
+  r2 <- 1 - (ss_res / ss_tot)
+  
+  # Calculate RMSE based on cumulative values
+  rmse <- sqrt(mean(residuals^2))
+  
+  return(c(R2 = r2, RMSE = rmse))
+}
+
+
+#  Function to calculate R² and RMSE for GGM based on cumulative data
+calculate_metrics_ggm_epidemics <- function(time_series) {
+
+  time_series_cum <- cumsum(time_series)  
+  # Initialize GGM model variable
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(time_series, mt='base', display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(time_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(ggm_model, newx = 1:length(time_series))
+  
+  # Calculate cumulative sum of the actual and fitted values
+  cumsum_actual <- time_series_cum
+  cumsum_fitted <- fitted_forecast
+  
+  # Calculate R² based on cumulative values
+  residuals <- cumsum_actual - cumsum_fitted
+  ss_res <- sum(residuals^2)
+  ss_tot <- sum((cumsum_actual - mean(cumsum_actual))^2)
+  r2 <- 1 - (ss_res / ss_tot)
+  
+  # Calculate RMSE based on cumulative values
+  rmse <- sqrt(mean(residuals^2))
+  
+  return(c(R2 = r2, RMSE = rmse))
+}
+
+ggm_residuals_epidemics <- function(time_series) {
+  
+  
+  time_series_cum <- cumsum(time_series)
+  
+  # Initialize GGM model variable
+  ggm_model <- NULL
+  
+  # Attempt first GGM model
+  try_result <- try({
+    ggm_model <- GGM(time_series, mt='base', display = FALSE)
+  }, silent = TRUE)
+  
+  # Check if an error occurred
+  if (inherits(try_result, "try-error")) {
+    if (grepl("chol.default.*not positive", try_result)) {
+      message("Cholesky decomposition error detected. Trying alternative model...")
+      
+      # Attempt alternative GGM method
+      try_result_alt <- try({
+        ggm_model <- GGM(time_series, mt=function(x) pchisq(x,10), display = FALSE)
+      }, silent = TRUE)
+      
+      # If alternative method also fails, stop execution
+      if (inherits(try_result_alt, "try-error")) {
+        stop("Both GGM model attempts failed. Error: ", try_result_alt)
+      }
+    } else {
+      stop("Unexpected error in GGM model: ", try_result)
+    }
+  }
+  
+  # Ensure the model was successfully created
+  if (is.null(ggm_model)) {
+    stop("Failed to fit GGM model.")
+  }
+  
+  # Forecast for the entire period
+  fitted_forecast <- predict(ggm_model, newx = 1:length(time_series))
+  
+  # Calculate residuals
+  residuals <- time_series_cum - fitted_forecast
+  
+  
+  
+  # Create and return a dataframe with fitted values and residuals
+  df_residuals <- data.frame(
+    Time = 1:length(time_series),
+    Fitted = fitted_forecast,
+    Residuals = residuals,
+    Cases = time_series_cum # actual covid cases
+    
+  )
+  
+  return(df_residuals)
+}
+
+
+process_epidemic <- function(time_series, epidemic) {
+  # Step 1: Get GGM residuals, fitted values, and actual cases
+  df_ggm <- ggm_residuals_epidemics(time_series)
+  
+  # Step 2: Fit auto.arima using GGM fitted values as xreg
+  arima_model <- auto.arima(df_ggm$Cases, xreg = df_ggm$Fitted)
+  
+  # Step 3: Get fitted values from the ARIMA model
+  arima_fitted <- fitted(arima_model)
+  
+  # Step 4: Create a data frame for plotting
+  plot_data <- data.frame(
+    Time = df_ggm$Time,
+    Actual = df_ggm$Cases,
+    Fitted = arima_fitted
+  )
+  
+  # Step 5: Plot actual vs. fitted values
+  plot <- ggplot(plot_data, aes(x = Time)) +
+    geom_line(aes(y = Actual, color = "Actual"), linewidth = 1) +
+    geom_line(aes(y = Fitted, color = "Fitted"), linewidth = 1, linetype = "dashed") +
+    labs(
+      title = epidemic,
+      x = "Time",
+      y = "Cases",
+      color = "Legend"
+    ) +
+    theme_minimal() +
+    scale_color_manual(values = c("Actual" = "blue", "Fitted" = "red")) +
+    theme(
+      legend.position = c(0.9, 0.1), #Bottom right
+    )
+  
+  return(plot)
+}
+
+
+
+process_epidemic_metrics <- function(time_series) {
+  # Step 1: Get GGM residuals, fitted values, and actual cases
+  df_ggm <- ggm_residuals_epidemics(time_series)
+  
+  # Step 2: Fit auto.arima using GGM fitted values as xreg
+  arima_model <- auto.arima(df_ggm$Cases, xreg = df_ggm$Fitted)
+  
+  # Step 3: Get fitted values from the ARIMA model
+  arima_fitted <- fitted(arima_model)
+  
+  # Step 4: Compute R² and RMSE
+  actual <- df_ggm$Cases
+  fitted <- arima_fitted
+  
+  # R² calculation
+  ss_total <- sum((actual - mean(actual))^2)
+  ss_residual <- sum((actual - fitted)^2)
+  r_squared <- 1 - (ss_residual / ss_total)
+  
+  # RMSE calculation
+  rmse <- sqrt(mean((actual - fitted)^2))
+  
+  # Step 5: Return results as a data frame
+  result <- data.frame(
+    R2 = r_squared,
+    RMSE = rmse
+  )
+  
+  return(result)
+}
+
+
+# 11. BM Epidemics-------------------------
+
+## 11.1 Dengue-------------
+
+# new cases
+plot_bm_model_epidemics(ts_casos_dengue, cumulative = FALSE)
+# cumulative
+plot_bm_model_epidemics(ts_casos_dengue, cumulative = TRUE)
+
+## 11.2 Zika-------------
+# new cases
+plot_bm_model_epidemics(ts_casos_zika, cumulative = FALSE)
+# cumulative
+plot_bm_model_epidemics(ts_casos_zika, cumulative = TRUE)
+
+## 11.3 Chicunguya-------------
+# new cases
+plot_bm_model_epidemics(ts_casos_chic, cumulative = FALSE)
+# cumulative
+plot_bm_model_epidemics(ts_casos_chic, cumulative = TRUE)
+
+
+# 12. GGM Epidemics----------------------
+
+## 12.1 Dengue-------------
+
+# new cases
+plot_ggm_model_epidemics(ts_casos_dengue, cumulative = FALSE)
+# cumulative
+plot_ggm_model_epidemics(ts_casos_dengue, cumulative = TRUE)
+
+## 12.2 Zika-------------
+# new cases
+plot_ggm_model_epidemics(ts_casos_zika, cumulative = FALSE)
+# cumulative
+plot_ggm_model_epidemics(ts_casos_zika, cumulative = TRUE)
+
+## 12.3 Chicunguya-------------
+# new cases
+plot_ggm_model_epidemics(ts_casos_chic, cumulative = FALSE)
+# cumulative
+plot_ggm_model_epidemics(ts_casos_chic, cumulative = TRUE)
+
+# 13. BM vs GGM Metrics Epidemics---------------
+
+# Assuming ts_casos_dengue, ts_casos_zika, and ts_casos_chic are your time series
+series_list <- list(
+  Dengue = ts_casos_dengue,
+  Zika = ts_casos_zika,
+  Chicungunya = ts_casos_chic
+)
+
+# Initialize a data frame to store the results
+results <- data.frame(
+  Series = character(),
+  Model = character(),
+  R2 = numeric(),
+  RMSE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each series and calculate metrics for both models
+for (name in names(series_list)) {
+  time_series <- series_list[[name]]
+  
+  # Calculate metrics for BM model
+  bm_metrics <- calculate_metrics_bm_epidemics(time_series)
+  results <- rbind(results, data.frame(
+    Series = name,
+    Model = "BM",
+    R2 = bm_metrics["R2"],
+    RMSE = bm_metrics["RMSE"],
+    stringsAsFactors = FALSE
+  ))
+  
+  # Calculate metrics for GGM model
+  ggm_metrics <- calculate_metrics_ggm_epidemics(time_series)
+  results <- rbind(results, data.frame(
+    Series = name,
+    Model = "GGM",
+    R2 = ggm_metrics["R2"],
+    RMSE = ggm_metrics["RMSE"],
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Print the results table
+print(results)
+View(results)
+
+# 14. GGM Epidemics residuals---------------------
+
+## 14.1 Dengue----------------
+df_res <- ggm_residuals_epidemics(ts_casos_dengue)
+residual_ts <- ts(df_res$Residuals)
+autoplot(residual_ts) + ggtitle("Residuals Dengue")
+
+## 14.2 Zika----------------
+df_res <- ggm_residuals_epidemics(ts_casos_zika)
+residual_ts <- ts(df_res$Residuals)
+autoplot(residual_ts) + ggtitle("Residuals Zika")
+
+## 14.3 Chicunguya----------------
+df_res <- ggm_residuals_epidemics(ts_casos_chic)
+residual_ts <- ts(df_res$Residuals)
+autoplot(residual_ts) + ggtitle("Residuals Chicunguya")
+
+# they all have structure
+
+# 15. GGM + Refinement Epidemics---------------
+
+## 15.1 Dengue---------------
+process_epidemic(ts_casos_dengue, 'Dengue')
+
+## 15.2 Zika---------------
+process_epidemic(ts_casos_zika, 'Zika')
+
+## 15.3 Chicunguya---------------
+process_epidemic(ts_casos_chic, 'Chicunguya')
+
+# 16. GGM + Refinement Metrics
+# Initialize a data frame to store the results
+results_arima <- data.frame(
+  Series = character(),
+  R2 = numeric(),
+  RMSE = numeric(),
+  stringsAsFactors = FALSE
+)
+
+# Loop through each series and calculate metrics using process_epidemic_metrics
+for (name in names(series_list)) {
+  time_series <- series_list[[name]]
+  
+  # Calculate metrics using process_epidemic_metrics
+  metrics <- process_epidemic_metrics(time_series)
+  
+  # Append the results to the data frame
+  results_arima <- rbind(results_arima, data.frame(
+    Series = name,
+    R2 = metrics["R2"],
+    RMSE = metrics["RMSE"],
+    stringsAsFactors = FALSE
+  ))
+}
+
+# Print the results table
+View(results_arima)
+
+
